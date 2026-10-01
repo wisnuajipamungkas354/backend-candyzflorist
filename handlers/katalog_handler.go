@@ -27,12 +27,20 @@ func isValidImageExtension(filename string) bool {
 
 // Helper to format full image URL
 func formatImageURL(c *gin.Context, filePath string) string {
+	filePath = strings.TrimSpace(filePath)
+	if filePath == "" {
+		return ""
+	}
+
 	if strings.HasPrefix(filePath, "http://") || strings.HasPrefix(filePath, "https://") {
+		if strings.HasPrefix(filePath, "http://myincoe.my.id") {
+			return strings.Replace(filePath, "http://", "https://", 1)
+		}
 		return filePath
 	}
 
 	scheme := "http"
-	if c.Request.TLS != nil {
+	if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" || strings.Contains(c.Request.Host, "myincoe.my.id") {
 		scheme = "https"
 	}
 	host := c.Request.Host
