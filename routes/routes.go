@@ -3,10 +3,18 @@ package routes
 import (
 	"candyzflorist-go/handlers"
 	"candyzflorist-go/middleware"
+
 	"github.com/gin-gonic/gin"
 )
 
 func SetupRoutes(r *gin.Engine) {
+	r.GET("/", func(c *gin.Context) {
+		c.JSON(200, gin.H{
+			"status":  "running",
+			"message": "Backend API is fully operational!",
+		})
+	})
+
 	api := r.Group("/api")
 
 	// 1. Static Uploads File Serving
