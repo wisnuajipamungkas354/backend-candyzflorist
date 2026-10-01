@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -365,9 +366,54 @@ func UpdateProduk(c *gin.Context) {
 		uploadDir = "./uploads"
 	}
 
-	// Handle Image Uploads if any
+	// Synchronize Existing Photos (Delete removed photos)
 	form, _ := c.MultipartForm()
 	if form != nil {
+		if rawVals, exists := form.Value["existing_photos"]; exists {
+			var keptPhotos []string
+			for _, v := range rawVals {
+				v = strings.TrimSpace(v)
+				if v == "" {
+					continue
+				}
+				// If JSON array string: ["url1", "url2"]
+				if strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]") {
+					var list []string
+					if err := json.Unmarshal([]byte(v), &list); err == nil {
+						keptPhotos = append(keptPhotos, list...)
+						continue
+					}
+				}
+				// Split by comma if any
+				for _, part := range strings.Split(v, ",") {
+					part = strings.TrimSpace(part)
+					if part != "" {
+						keptPhotos = append(keptPhotos, part)
+					}
+				}
+			}
+
+			// Delete photos not present in keptPhotos
+			for _, img := range product.FotoProduk {
+				isKept := false
+				imgBase := filepath.Base(img.FilePath)
+				for _, kept := range keptPhotos {
+					if strings.Contains(kept, img.FilePath) || (imgBase != "" && strings.Contains(kept, imgBase)) {
+						isKept = true
+						break
+					}
+				}
+
+				if !isKept {
+					if !strings.HasPrefix(img.FilePath, "http") {
+						_ = os.Remove(img.FilePath)
+					}
+					config.DB.Delete(&img)
+				}
+			}
+		}
+
+		// Handle New Image Uploads if any
 		files := form.File["images"]
 		if len(files) == 0 {
 			files = form.File["foto_produk"]
