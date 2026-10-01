@@ -369,7 +369,15 @@ func UpdateProduk(c *gin.Context) {
 	// Synchronize Existing Photos (Delete removed photos)
 	form, _ := c.MultipartForm()
 	if form != nil {
-		if rawVals, exists := form.Value["existing_photos"]; exists {
+		var rawVals []string
+		if vals, ok := form.Value["existing_photos"]; ok {
+			rawVals = append(rawVals, vals...)
+		}
+		if vals, ok := form.Value["existing_photos[]"]; ok {
+			rawVals = append(rawVals, vals...)
+		}
+
+		if len(rawVals) > 0 || len(form.Value["existing_photos"]) > 0 || len(form.Value["existing_photos[]"]) > 0 {
 			var keptPhotos []string
 			for _, v := range rawVals {
 				v = strings.TrimSpace(v)
@@ -396,9 +404,17 @@ func UpdateProduk(c *gin.Context) {
 			// Delete photos not present in keptPhotos
 			for _, img := range product.FotoProduk {
 				isKept := false
-				imgBase := filepath.Base(img.FilePath)
+				imgBase := filepath.Base(filepath.ToSlash(img.FilePath))
+				imgClean := strings.TrimPrefix(filepath.ToSlash(img.FilePath), "./")
+
 				for _, kept := range keptPhotos {
-					if strings.Contains(kept, img.FilePath) || (imgBase != "" && strings.Contains(kept, imgBase)) {
+					kept = strings.TrimSpace(kept)
+					keptBase := filepath.Base(filepath.ToSlash(kept))
+					keptClean := strings.TrimPrefix(filepath.ToSlash(kept), "./")
+
+					if (imgBase != "" && (imgBase == keptBase || strings.Contains(kept, imgBase))) ||
+						(imgClean != "" && strings.Contains(keptClean, imgClean)) ||
+						(img.FilePath != "" && strings.Contains(kept, img.FilePath)) {
 						isKept = true
 						break
 					}
@@ -407,8 +423,9 @@ func UpdateProduk(c *gin.Context) {
 				if !isKept {
 					if !strings.HasPrefix(img.FilePath, "http") {
 						_ = os.Remove(img.FilePath)
+						_ = os.Remove(filepath.FromSlash(img.FilePath))
 					}
-					config.DB.Delete(&img)
+					config.DB.Unscoped().Where("id = ?", img.ID).Delete(&models.ProdukImage{})
 				}
 			}
 		}
@@ -431,23 +448,32 @@ func UpdateProduk(c *gin.Context) {
 		}
 	}
 
-	config.DB.Save(&product)
-
-	// Fetch updated product
-	config.DB.Preload("Kategori").Preload("FotoProduk").First(&product, product.ID)
-
-	var photoUrls []string
-	for _, f := range product.FotoProduk {
-		photoUrls = append(photoUrls, formatImageURL(c, f.FilePath))
-	}
-
-	helpers.SuccessResponse(c, http.StatusOK, "Produk berhasil diperbarui", gin.H{
-		"id":          product.ID,
+	// Update only the product fields, avoiding re-saving stale associations
+	config.DB.Model(&product).Select("NamaProduk", "Slug", "Harga", "Deskripsi").Updates(map[string]interface{}{
 		"nama_produk": product.NamaProduk,
 		"slug":        product.Slug,
 		"harga":       product.Harga,
 		"deskripsi":   product.Deskripsi,
-		"kategori":    product.Kategori,
+	})
+
+	// Fetch fresh updated product
+	var updatedProduct models.Produk
+	config.DB.Preload("Kategori").Preload("FotoProduk").First(&updatedProduct, product.ID)
+
+	var photoUrls []string
+	for _, f := range updatedProduct.FotoProduk {
+		if strings.TrimSpace(f.FilePath) != "" {
+			photoUrls = append(photoUrls, formatImageURL(c, f.FilePath))
+		}
+	}
+
+	helpers.SuccessResponse(c, http.StatusOK, "Produk berhasil diperbarui", gin.H{
+		"id":          updatedProduct.ID,
+		"nama_produk": updatedProduct.NamaProduk,
+		"slug":        updatedProduct.Slug,
+		"harga":       updatedProduct.Harga,
+		"deskripsi":   updatedProduct.Deskripsi,
+		"kategori":    updatedProduct.Kategori,
 		"foto_produk": photoUrls,
 	})
 }
